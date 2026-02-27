@@ -1,90 +1,141 @@
 import re
+import spacy
 
-units =  "kg|tons|liters|cans|bottles|boxes|cartons|packs|packets|bags|sacks|drums|containers|crates|pallets|bundles|pieces|pcs|units|items|dozen|pairs|sets|trays"
+# Load English NLP model
+nlp = spacy.load("en_core_web_sm")
+
+# Units & actions
+units = [
+    "kg","tons","liters","cans","bottles","boxes","cartons","packs","packets",
+    "bags","sacks","drums","containers","crates","pallets","bundles",
+    "pieces","pcs","units","items","dozen","pairs","sets","trays"
+]
 
 actions = [
-    # stock movement
     "received", "arrived", "shipped", "sent",
     "dispatched", "delivered", "issued",
-    "transferred", "moved",
-
-    # stock status
-    "left", "remaining", "available",
-    "in stock", "out of stock",
-
-    # inventory operations
-    "added", "removed", "returned",
+    "transferred", "moved", "left", "remaining",
+    "available", "added", "removed", "returned",
     "damaged", "expired", "consumed",
     "used", "allocated", "picked",
     "packed", "loaded", "unloaded",
-
-    # adjustments
-    "adjusted", "updated", "counted",
-    "reconciled", "restocked","finished"
-]
-# stop item before action words
-action_pattern = "|".join(actions)
-
-patterns = [
-    # ---- WITH UNIT ----
-    rf'(\d+)\s*({units})\s*of\s*([a-zA-Z]+)',
-    rf'([a-zA-Z]+)\s*of\s*(\d+)\s*({units})',
-    rf'(\d+)\s*({units})\s*([a-zA-Z]+)',
-
-    # ---- WITHOUT UNIT ----
-    rf'(\d+)\s+([a-zA-Z]+)(?=\s*(?:{action_pattern}))',
-    rf'([a-zA-Z]+)\s+(\d+)',
-    rf'([a-zA-Z]+)\s*of\s*(\d+)'
+    "got", "found", "lost", "counted",
+    "adjusted", "updated", "reconciled", "restocked", "finished"
 ]
 
+# Helper to singularize
 def singular(word):
+    if word.endswith("es"):
+        return word[:-2]
     if word.endswith("s"):
         return word[:-1]
     return word
 
+
 def extract_info(text):
-    quantity = unit = item = action = None
-    text = text.lower()
+    text = text.lower().strip()
+    doc = nlp(text)
 
-    for p in patterns:
-        m = re.search(p, text)
-        if m:
-            groups = m.groups()
+    quantity = None
+    unit = None
+    item = None
+    action = None
 
-            if len(groups) == 3:
-                if groups[0].isdigit():
-                    quantity, unit, item = groups
-                else:
-                    item, quantity, unit = groups
-            elif len(groups) == 2:
-                if groups[0].isdigit():
-                    quantity, item = groups
-                else:
-                    item, quantity = groups
+    # -------------------------------
+    # Detect quantity, unit, item
+    # -------------------------------
+    for i, token in enumerate(doc):
 
+        if quantity and item:
             break
 
-    # detect action
-    for a in actions:
-        if a in text:
-            action = a
+        if token.like_num and quantity is None:
+            quantity = token.text
+
+            # Case 1: number + unit
+            if i + 1 < len(doc) and doc[i + 1].text in units:
+                unit = doc[i + 1].text
+
+                # Case 1A: number + unit + of + item
+                if i + 2 < len(doc) and doc[i + 2].text == "of":
+                    if i + 3 < len(doc):
+                        item = singular(doc[i + 3].text)
+
+                # Case 1B: number + unit + item
+                elif i + 2 < len(doc):
+                    item = singular(doc[i + 2].text)
+
+            # Case 2: number + item (no unit)
+            elif i + 1 < len(doc):
+                item = singular(doc[i + 1].text)
+
+    # -------------------------------
+    # Regex fallback (if SpaCy fails)
+    # -------------------------------
+    if not item:
+        patterns = [
+            rf'(\d+)\s*({"|".join(units)})\s*of\s*([a-zA-Z]+)',
+            rf'([a-zA-Z]+)\s*of\s*(\d+)\s*({"|".join(units)})',
+            rf'(\d+)\s*({"|".join(units)})\s*([a-zA-Z]+)'
+        ]
+
+        for p in patterns:
+            m = re.search(p, text)
+            if m:
+                g = m.groups()
+                if g[0].isdigit():
+                    quantity, unit, item = g
+                else:
+                    item, quantity, unit = g
+                item = singular(item)
+                break
+
+    # -------------------------------
+    # Detect action
+    # -------------------------------
+    for token in doc:
+        if token.text in actions:
+            action = token.text
             break
 
-    # clean item
+    # -------------------------------
+    # Final Safety Normalization
+    # -------------------------------
+    if quantity:
+        quantity = int(quantity)
+
     if item:
-        item = singular(item.strip())
+        item = item.strip()
+
+    if not unit:
+        unit = "units"
+
+    if action:
+        action = action.lower()
+
+    # Prevent garbage words as item
+    if item in ["of", "the", "and"]:
+        item = None
 
     return quantity, unit, item, action
 
 
-"""tests = [
-    "30 kg of fruits left",
-    "fruits of 30 kg left",
-    "30 kg fruits left",
-    "milk of 30 cans left",
-    "10 dozen of eggs are left",
-    "50 apples arrived"
-]"""
+# -------------------------------
+# Test Section
+# -------------------------------
+""""
+if __name__ == "__main__":
+    tests = [
+        "I got 5 tons of mangoes",
+        "30 kg of fruits left",
+        "fruits of 30 kg left",
+        "30 kg fruits left",
+        "milk of 30 cans left",
+        "10 dozen of eggs are left",
+        "50 apples arrived",
+        "20 bottles of water shipped"
+    ]
 
-"""for t in tests:
-    print(t, "→", extract_info(t))"""
+    for t in tests:
+        print(t, "→", extract_info(t))
+        """

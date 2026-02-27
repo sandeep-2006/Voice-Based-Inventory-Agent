@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Worker Portal</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 40px;
+            background: #f4f6f9;
+            margin:0;
+        }
+        .topbar {
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            margin-bottom:30px;
+        }
+        h1 { margin:0; }
+        input[type="file"] { margin: 20px 0; }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius:6px;
+            border:none;
+            background:#1976d2;
+            color:white;
+        }
+        button:hover {
+            background:#1565c0;
+        }
+        .logout-btn {
+            background:#d32f2f;
+        }
+        .logout-btn:hover {
+            background:#b71c1c;
+        }
+        #result { margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+    <h1>Voice Inventory Update</h1>
+    <button class="logout-btn" onclick="window.location.href='/logout'">
+        Logout
+    </button>
+</div>
+
+<p>Select a pre-recorded audio file (.wav or .ogg) with your inventory update:</p>
+<input type="file" id="audioFile" accept=".wav,.ogg">
+<br>
+<button id="uploadBtn">Upload & Process</button>
+
+<div id="result"></div>
+
+<script>
+const uploadBtn = document.getElementById('uploadBtn');
+const audioFile = document.getElementById('audioFile');
+
+uploadBtn.onclick = async () => {
+    if (!audioFile.files.length) {
+        alert("Please select an audio file first!");
+        return;
+    }
+
+    const file = audioFile.files[0];
+    const formData = new FormData();
+    formData.append('audio', file);
+
+    document.getElementById('result').innerHTML = "Processing...";
+
+    try {
+        const response = await fetch('/process_audio', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        document.getElementById('result').innerHTML = `
+            <h3>Heard: "${data.transcript}"</h3>
+            <p>${data.note}</p>
+        `;
+    } catch (err) {
+        document.getElementById('result').innerHTML = "Error processing audio.";
+        console.error(err);
+    }
+};
+</script>
+
+</body>
+</html>
